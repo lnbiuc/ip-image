@@ -7,13 +7,14 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/fogleman/gg"
 )
 
-// IPInfo 定义从 ip-api.com 获取的 JSON 响应结构
+// ip-api.com 返回结构
 type IPInfo struct {
 	Query      string `json:"query"`
 	Country    string `json:"country"`
@@ -23,13 +24,21 @@ type IPInfo struct {
 	Org        string `json:"org"`
 	AS         string `json:"as"`
 	Status     string `json:"status"`
-	Message    string `json:"message"` // 错误信息
+	Message    string `json:"message"`
 }
 
-// 获取客户端真实 IP
+// 百度API返回结构
+type BaiduAPIResponse struct {
+	Status  int    `json:"status"`
+	Address string `json:"address"`
+	Content struct {
+		Address string `json:"address"`
+	} `json:"content"`
+}
+
+var baiduAK string // 百度API key
+
 func getClientIP(r *http.Request) string {
-	//return "222.90.15.11"
-	// 优先检查 X-Forwarded-For 或 X-Real-IP（代理环境下常用）
 	xff := r.Header.Get("X-Forwarded-For")
 	if xff != "" {
 		parts := strings.Split(xff, ",")
@@ -39,8 +48,6 @@ func getClientIP(r *http.Request) string {
 	if xrip != "" {
 		return xrip
 	}
-
-	// fallback: RemoteAddr
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
@@ -48,7 +55,6 @@ func getClientIP(r *http.Request) string {
 	return ip
 }
 
-// 查询 IP 定位信息
 func getIPInfo(ip string) (*IPInfo, error) {
 	url := fmt.Sprintf("http://ip-api.com/json/%s?lang=zh-CN", ip)
 	resp, err := http.Get(url)
@@ -61,38 +67,34 @@ func getIPInfo(ip string) (*IPInfo, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
 		return nil, err
 	}
-
+	log.Println(info)
 	if info.Status != "success" {
-		return nil, fmt.Errorf("查询失败: %s", info.Message)
+		return nil, fmt.Errorf("ip-api 查询失败: %s", info.Message)
 	}
 	return &info, nil
 }
 
-type pngBufferWriter struct {
-	b *strings.Builder
-}
-
-func (w *pngBufferWriter) Write(p []byte) (n int, err error) {
-	return w.b.WriteString(string(p))
-}
-
-// HTTP 处理函数
-func handler(w http.ResponseWriter, r *http.Request) {
-	log.Println("==收到请求==")
-	log.Println("正在获取IP地址")
-	ip := getClientIP(r)
-
-	info, err := getIPInfo(ip)
+func getBaiduAddress(ip, ak string) (string, error) {
+	url := fmt.Sprintf("https://api.map.baidu.com/location/ip?ip=%s&coor=bd09ll&ak=%s", ip, ak)
+	resp, err := http.Get(url)
 	if err != nil {
-		http.Error(w, "IP信息获取失败: "+err.Error(), http.StatusInternalServerError)
-		return
+		return "", err
 	}
-	log.Println("获取到IP信息: " + ip)
+	defer resp.Body.Close()
 
-	//timestamp := time.Now().Format("2006-01-02 15:04:05")
+	var result BaiduAPIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	log.Println(result)
+	if result.Status != 0 {
+		return "", fmt.Errorf("百度API返回状态错误: %d", result.Status)
+	}
+	return result.Content.Address, nil
+}
+
+func renderImage(w http.ResponseWriter, ip string, info *IPInfo, address string) {
 	now := time.Now()
-
-	// 获取中文星期
 	weekdays := map[time.Weekday]string{
 		time.Sunday:    "星期日",
 		time.Monday:    "星期一",
@@ -102,18 +104,15 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		time.Friday:    "星期五",
 		time.Saturday:  "星期六",
 	}
-
 	timestamp := now.Format("2006年01月02日") + " " + weekdays[now.Weekday()]
 
 	const width = 350
 	const height = 120
-	log.Println("开始生成图片")
 	dc := gg.NewContext(width, height)
-
-	dc.SetRGB(1, 1, 1) // 白色背景
+	dc.SetRGB(1, 1, 1)
 	dc.Clear()
-
 	dc.SetRGB(0, 0, 0)
+
 	fontPath := "./MapleMono-NF-CN-Regular.ttf"
 	if err := dc.LoadFontFace(fontPath, 15); err != nil {
 		http.Error(w, "字体加载失败: "+err.Error(), http.StatusInternalServerError)
@@ -125,7 +124,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		value string
 	}{
 		{"今天是: ", timestamp},
-		{"您的地址是: ", fmt.Sprintf("%s %s %s", info.Country, info.RegionName, info.City)},
+		{"您的地址是: ", address},
 		{"您的IP是: ", info.Query},
 		{"运营商信息: ", info.Org},
 		{"AS信息: ", info.AS},
@@ -133,26 +132,64 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	y := 25.0
 	for _, line := range lines {
-		dc.SetRGB(0, 0, 0) // 黑色文字
+		dc.SetRGB(0, 0, 0)
 		dc.DrawString(line.label, 10, y)
-
-		// 获取 label 的宽度，用于计算 value 的起始位置
 		labelWidth, _ := dc.MeasureString(line.label)
-
-		dc.SetRGB(1, 0, 0) // 红色文字
+		dc.SetRGB(1, 0, 0)
 		dc.DrawString(line.value, 10+labelWidth, y)
-
 		y += 20
 	}
-	log.Println("图片生成完成")
+
 	w.Header().Set("Content-Type", "image/png")
 	if err := png.Encode(w, dc.Image()); err != nil {
 		http.Error(w, "图像生成失败", http.StatusInternalServerError)
 	}
 }
 
+// 支持自动识别客户端IP
+func handler(w http.ResponseWriter, r *http.Request) {
+	ip := getClientIP(r)
+	serveWithIP(w, ip)
+}
+
+// 支持通过参数 ?ip=xxx 指定IP
+func handlerWithQuery(w http.ResponseWriter, r *http.Request) {
+	ip := r.URL.Query().Get("ip")
+	if ip == "" {
+		http.Error(w, "请通过 ?ip= 参数提供 IP 地址", http.StatusBadRequest)
+		return
+	}
+	serveWithIP(w, ip)
+}
+
+// 核心处理逻辑
+func serveWithIP(w http.ResponseWriter, ip string) {
+	log.Println("处理IP:", ip)
+
+	info, err := getIPInfo(ip)
+	if err != nil {
+		http.Error(w, "获取ip-api信息失败: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	address, err := getBaiduAddress(ip, baiduAK)
+	if err != nil {
+		http.Error(w, "获取百度定位失败: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	renderImage(w, ip, info, address)
+}
+
 func main() {
+	baiduAK = os.Getenv("BAIDU_API_KEY")
+	if baiduAK == "" {
+		log.Fatal("请通过环境变量 BAIDU_API_KEY 提供百度API Key")
+	}
+
 	http.HandleFunc("/AQuVk4853gdCarY6ysbscNZCL4A7ndgK", handler)
+	http.HandleFunc("/9uTWQKMJPcUuihF4LUtCtj48GkkRaZ82", handlerWithQuery)
+
 	fmt.Println("Server running at 8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
