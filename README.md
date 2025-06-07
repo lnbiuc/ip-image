@@ -1,5 +1,10 @@
 ![image.png](https://cdn.violet.vin/v2/S8CVLHD.png)
 
+# 介绍
+获取客户端IP地址、AS信息，返回一张png图片，用于teamspeak服务器bunner展示。
+
+基于ip-api（限制qps45）和百度ip定位api
+
 # Build
 
 ```ps1
@@ -13,7 +18,7 @@ set GOOS=linux
 set GOARCH=amd64
 go build -o go-ip-info-linux-amd64 main.go
 ```
-# Run
+# 使用
 
 ```service
 [Unit]
@@ -21,12 +26,13 @@ Description=Go IP Info Web Service
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/go-ip-info
+WorkingDirectory=/root/ipinfo
+ExecStart=/root/ipinfo/go-ip-info-linux-amd64
+Environment=BAIDU_API_KEY=<替换成百度APIKEY>
 Restart=always
-RestartSec=5
-WorkingDirectory=/usr/local/bin
-StandardOutput=append:/var/log/go-ip-info.log
-StandardError=append:/var/log/go-ip-info-error.log
+RestartSec=3
+StandardOutput=append:/root/ipinfo/output.log
+StandardError=append:/root/ipinfo/error.log
 
 [Install]
 WantedBy=multi-user.target

@@ -106,7 +106,7 @@ func renderImage(w http.ResponseWriter, ip string, info *IPInfo, address string)
 	}
 	timestamp := now.Format("2006年01月02日") + " " + weekdays[now.Weekday()]
 
-	const width = 350
+	const width = 550
 	const height = 120
 	dc := gg.NewContext(width, height)
 	dc.SetRGB(1, 1, 1)
