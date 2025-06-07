@@ -105,8 +105,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	timestamp := now.Format("2006年01月02日") + " " + weekdays[now.Weekday()]
 
-	const width = 500
-	const height = 215
+	const width = 350
+	const height = 120
 	log.Println("开始生成图片")
 	dc := gg.NewContext(width, height)
 
@@ -115,24 +115,10 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	dc.SetRGB(0, 0, 0)
 	fontPath := "./MapleMono-NF-CN-Regular.ttf"
-	if err := dc.LoadFontFace(fontPath, 20); err != nil {
+	if err := dc.LoadFontFace(fontPath, 15); err != nil {
 		http.Error(w, "字体加载失败: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	//lines := []string{
-	//	fmt.Sprintf("今天是: %s", timestamp),
-	//	fmt.Sprintf("欢迎来自 %s %s %s 的朋友！", info.Country, info.RegionName, info.City),
-	//	fmt.Sprintf("您的IP地址是: %s", info.Query),
-	//	fmt.Sprintf("运营商信息: %s", info.Org),
-	//	fmt.Sprintf("AS信息: %s", info.AS),
-	//}
-	//
-	//y := 40.0
-	//for _, line := range lines {
-	//	dc.DrawString(line, 20, y)
-	//	y += 35
-	//}
 
 	lines := []struct {
 		label string
@@ -145,18 +131,18 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		{"AS信息: ", info.AS},
 	}
 
-	y := 40.0
+	y := 25.0
 	for _, line := range lines {
 		dc.SetRGB(0, 0, 0) // 黑色文字
-		dc.DrawString(line.label, 20, y)
+		dc.DrawString(line.label, 10, y)
 
 		// 获取 label 的宽度，用于计算 value 的起始位置
 		labelWidth, _ := dc.MeasureString(line.label)
 
 		dc.SetRGB(1, 0, 0) // 红色文字
-		dc.DrawString(line.value, 20+labelWidth, y)
+		dc.DrawString(line.value, 10+labelWidth, y)
 
-		y += 35
+		y += 20
 	}
 	log.Println("图片生成完成")
 	w.Header().Set("Content-Type", "image/png")
